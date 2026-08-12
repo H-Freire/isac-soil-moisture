@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
 
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20.0)
 

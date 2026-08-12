@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
+
+# SPDX-License-Identifier: MIT
+
 BasedOnStyle: LLVM
 IndentWidth: 2
 ColumnLimit: 100
