@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
+
+# SPDX-License-Identifier: CC-BY-SA-4.0
+
+manifest:
+  remotes:
+    - name: zephyr-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyr-rtos
+      revision: main # v4.4.2-rc1
+      west-commands: scripts/west-commands.yml
+      import:
+        name-allowlist:
+          - fatfs
+          - hal_espressif
+          - hostap
+          - loramac-node
+          - mbedtls
+          - mcuboot
+          - tf-psa-crypto
+          - zcbor
+  self:
+    path: apps
+

@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
+
+# SPDX-License-Identifier: CC-BY-SA-4.0
+
+mainmenu "Sink"
+
+config GOOGLE_SCRIPT_SECRET
+    string "Google Apps Script API key"
+    help
+      Secret API key for HTTP POST on script.
+
+config GOOGLE_SCRIPT_URL
+    string "Google Apps Script URL"
+    help
+      Google Apps Script script path (macros/s/<script_id>/exec).
+
+config GOOGLE_SCRIPT_HOST
+    string "Google Apps Script domain"
+    default "script.google.com"
+    help
+      Google Apps Script domain.
+
+source "Kconfig.zephyr"

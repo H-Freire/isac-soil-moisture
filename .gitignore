@@ -1,0 +1,9 @@
+# Dev env
+.direnv/
+
+# Build artifacts
+**/build/
+.cache
+
+# Zephyr secrets
+secrets.conf

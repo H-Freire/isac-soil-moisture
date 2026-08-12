@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
+
+# SPDX-License-Identifier: CC-BY-SA-4.0
+
+mainmenu "Wi-Fi sensing"
+
+config UDP_PORT
+    int "UDP port"
+    default 5555
+    help
+      UDP port for Wi-Fi sensing data collection.
+
+config WIFI_SSID
+    string "SSID of soft AP"
+    default "wifi_sensing"
+    help
+      SSID of the soft AP created by the sample.
+
+config WIFI_CHANNEL
+    int "Wi-Fi operating channel"
+    default 1
+    help
+      Wi-Fi channel for both sensing and communication.
+
+config WIFI_WPA_ENTERPRISE
+    bool "WPA enterprise"
+    default n
+    help
+      Use Wi-Fi WPA Enterprise mode (PEAP-MSCHAPV2).
+
+config WIFI_EAP_ID
+    string "EAP client id"
+    depends on WIFI_WPA_ENTERPRISE
+    help
+      EAP client identifier.
+
+config WIFI_EAP_PASSWD
+    string "EAP client passwd"
+    depends on WIFI_WPA_ENTERPRISE
+    help
+      EAP client password
+
+config WIFI_PSK
+    string "Pre-shared key for soft AP"
+    default "sembei_isac"
+    depends on !WIFI_WPA_ENTERPRISE
+    help
+      WPA2 password used by the soft AP for client authentication.
