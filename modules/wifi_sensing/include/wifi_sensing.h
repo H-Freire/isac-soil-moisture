@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <inttypes.h>
+#include <stdint.h>
 #include <zephyr/net/socket.h>
 
 #define MAC_ADDR_LEN 6
@@ -21,9 +21,10 @@
 #define PROBE_MSG_SIZE   sizeof(probe_msg_t)
 
 #define SENSING_RATE_HZ      10
-#define SENSING_PERIOD_MS    (1000 / SENSING_RATE_HZ)
 #define SENSING_WINDOW_SIZE  100
-#define SENSING_INTERVAL_SEC (5 * 60)
+#define SENSING_INTERVAL_SEC (10 * 60)
+#define SENSING_PERIOD_MSEC  (1000 / SENSING_RATE_HZ)
+#define SENSING_WINDOW_SEC   (SENSING_WINDOW_SIZE / SENSING_RATE_HZ)
 
 #if (MAX_MSG_PAYLOAD > 10) || (MAX_MSG_PAYLOAD < 1)
 #error "MAX_MSG_PAYLOAD must be in the [1, 10] interval"
@@ -39,8 +40,8 @@
 
 enum {
   MSG_ID_CSI     = 0xDEAD,
-  MSG_ID_SENSORS = 0xBEEF,
   MSG_ID_PROBE   = 0xC0DE,
+  MSG_ID_SENSORS = 0xBEEF,
 };
 
 typedef uint16_t msg_id_t;
@@ -54,19 +55,24 @@ typedef struct {
   uint32_t seq;
   uint8_t mac[MAC_ADDR_LEN];
 
-  uint16_t temp;
-  uint16_t moisture;
-
   uint8_t agc;
   int8_t rssi;
   int8_t csi[128];
+} __attribute__((packed)) csi_data_t;
+
+typedef struct {
+  uint16_t temp;
+  uint16_t moisture;
+
+  // Whether the data collection happened because of a timeout
+  bool timeout;
 } __attribute__((packed)) sensor_data_t;
 
 typedef struct {
   msg_id_t id;
   uint8_t count;
 
-  sensor_data_t payload[];
+  csi_data_t payload[];
 } __attribute__((packed)) sensor_msg_t;
 
 typedef struct {

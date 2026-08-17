@@ -2,6 +2,9 @@
 
 // SPDX-License-Identifier: MIT
 
+#include <math.h>
+#include <stdint.h>
+
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/adc.h>
@@ -28,10 +31,14 @@
 #define QUEUE_SIZE 30
 #define MSG_COUNT  (SENSING_WINDOW_SIZE / MAX_MSG_PAYLOAD)
 
-#define SENSOR_SAMPLES    1
-#define ADC_NODE          DT_ALIAS(adc0)
-#define RF_SWITCH_NODE    DT_NODELABEL(rf_switch)
-#define ADC_CHANNEL_COUNT ARRAY_SIZE(s_adc_cfgs)
+#define SENSOR_SAMPLES       10
+#define SENSOR_INTERVAL_MSEC 1000
+
+#define ADC_RES               12
+#define ADC_NODE              DT_ALIAS(adc0)
+#define RF_SWITCH_NODE        DT_NODELABEL(rf_switch)
+#define ADC_CHANNEL_COUNT     ARRAY_SIZE(s_adc_cfgs)
+#define CHANNEL_VREF(node_id) DT_PROP_OR(node_id, zephyr_vref_mv, 3300)
 
 BUILD_ASSERT(DT_NODE_HAS_STATUS_OKAY(ADC_NODE), "ADC controller disabled");
 BUILD_ASSERT(SENSOR_SAMPLES >= 1, "Invalid count of sensor samples");
@@ -79,24 +86,20 @@ static const struct gpio_dt_spec s_ant_sel = GPIO_DT_SPEC_GET(RF_SWITCH_NODE, se
 static const struct adc_channel_cfg s_adc_cfgs[] = {
     DT_FOREACH_CHILD_SEP(ADC_NODE, ADC_CHANNEL_CFG_DT, (,))
 };
-static const struct adc_sequence_options opts = {
-  .interval_us     = 0,
-  .extra_samplings = SENSOR_SAMPLES - 1,
+static const uint32_t s_vrefs[] = {
+    DT_FOREACH_CHILD_SEP(ADC_NODE, CHANNEL_VREF, (,))
 };
 // clang-format on
 
 static struct in_addr s_ap_addr;
 static uint8_t s_mac_addr[MAC_ADDR_LEN];
 
-static uint16_t adc_reading[SENSOR_SAMPLES][ADC_CHANNEL_COUNT];
 static struct adc_sequence s_adc_sequence = {
-    .buffer      = adc_reading,
-    .buffer_size = sizeof(adc_reading),
-    .calibrate   = true,
-    .resolution  = 12,
-    .options     = &opts,
+    .buffer_size = sizeof(uint16_t),
+    .resolution  = ADC_RES,
 };
 
+K_SEM_DEFINE(s_sensing_sem, 0, 1);
 K_TIMER_DEFINE(s_sensing_timer, NULL, NULL);
 K_MSGQ_DEFINE(s_sensor_msgq, SENSOR_DATA_SIZE, QUEUE_SIZE, 4);
 
@@ -106,7 +109,7 @@ K_THREAD_DEFINE(sensors_read_id, SENSOR_STACK_SIZE, sensors_read_thread, NULL, N
                 SENSOR_PRIORITY, 0, 0);
 
 void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
-  sensor_data_t frame;
+  csi_data_t frame;
 
   if (!info || !info->buf) {
     LOG_WRN("<invalid arg> wifi_csi_cb. info: %p %" PRIu16 " %" PRIu16, info->buf, info->len,
@@ -144,6 +147,8 @@ void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
   } else {
     LOG_ERR("Failed to send CSI frame");
   }
+
+  k_sem_give(&s_sensing_sem);
 }
 
 static inline void enable_antenna(enum ant_type antenna) {
@@ -155,35 +160,40 @@ static inline void enable_antenna(enum ant_type antenna) {
   gpio_pin_set_dt(&s_ant_sel, antenna);
 }
 
-static void udp_client_thread(void *, void *, void *) {
+static int udp_sock(struct in_addr dest_addr) {
   int sock;
-
-  static uint8_t msg_buf[MSG_COUNT][SENSOR_MSG_SIZE + MAX_MSG_PAYLOAD * SENSOR_DATA_SIZE];
-
-  k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
+  char ip_str[INET_ADDRSTRLEN];
 
   struct sockaddr_in server_addr = {
       .sin_family = AF_INET,
       .sin_port   = htons(CONFIG_UDP_PORT),
-      .sin_addr   = s_ap_addr,
+      .sin_addr   = dest_addr,
   };
 
   sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (sock < 0) {
     LOG_ERR("Failed to create UDP socket: %d", errno);
-    return;
+    return sock;
   }
 
   if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
     LOG_ERR("Failed to connect UDP socket: %d", errno);
-    return;
+    close(sock);
+    return -1;
   }
 
-  {
-    char ip_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &s_ap_addr, ip_str, sizeof(ip_str));
-    LOG_INF("UDP socket registered to %s:%d", ip_str, CONFIG_UDP_PORT);
-  }
+  inet_ntop(AF_INET, &dest_addr, ip_str, sizeof(ip_str));
+  LOG_INF("UDP socket registered to %s:%d", ip_str, CONFIG_UDP_PORT);
+
+  return sock;
+}
+
+static void udp_client_thread(void *, void *, void *) {
+  static uint8_t msg_buf[MSG_COUNT][SENSOR_MSG_SIZE + MAX_MSG_PAYLOAD * SENSOR_DATA_SIZE];
+
+  k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
+
+  int sock = udp_sock(s_ap_addr);
 
   esp_wifi_set_csi(true);
 
@@ -194,8 +204,7 @@ static void udp_client_thread(void *, void *, void *) {
 
       for (size_t i = 0; i < MAX_MSG_PAYLOAD; i++) {
         // Reception timed out (given the sensing window size)
-        if (k_msgq_get(&s_sensor_msgq, &msg->payload[i],
-                       K_SECONDS(SENSING_WINDOW_SIZE / SENSING_RATE_HZ))) {
+        if (k_msgq_get(&s_sensor_msgq, &msg->payload[i], K_SECONDS(SENSING_WINDOW_SEC))) {
           count += i > 0;
           goto transmit;
         }
@@ -208,9 +217,8 @@ static void udp_client_thread(void *, void *, void *) {
     esp_wifi_set_csi(false);
     enable_antenna(INT_ANT);
 
-    // Start timer with a margin of one sensing window
-    k_timer_start(&s_sensing_timer,
-                  K_SECONDS(SENSING_INTERVAL_SEC - (SENSING_WINDOW_SIZE / SENSING_RATE_HZ + 1)),
+    // Start timer with a margin of two sensing window
+    k_timer_start(&s_sensing_timer, K_SECONDS(SENSING_INTERVAL_SEC - (3 * SENSING_WINDOW_SEC)),
                   K_NO_WAIT);
 
     for (size_t i = 0; i < count; i++) {
@@ -220,13 +228,13 @@ static void udp_client_thread(void *, void *, void *) {
                      SENSOR_MSG_SIZE + ((sensor_msg_t *)msg_buf[i])->count * SENSOR_DATA_SIZE, 0);
 
       if (ret < 0) {
-        LOG_ERR("Failed to send UDP packet: %d", errno);
+        LOG_ERR("Failed to send CSI UDP packet: %d", errno);
       } else {
         LOG_INF("Sent %d bytes to AP", ret);
       }
     }
 
-    // Switch back to external antenna right before next sensing window
+    // Block until next sensing window
     k_timer_status_sync(&s_sensing_timer);
 
     enable_antenna(EXT_ANT);
@@ -235,17 +243,78 @@ static void udp_client_thread(void *, void *, void *) {
 }
 
 static void sensors_read_thread(void *, void *, void *) {
+  sensor_data_t data;
+  uint16_t adc_reading[SENSOR_SAMPLES];
+
+  k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
+
+  int sock = udp_sock(s_ap_addr);
+
+  int ret;
   while (true) {
-    int err = adc_read(s_adc, &s_adc_sequence);
-    if (err < 0) {
-      LOG_ERR("Could not read sensors: %d", err);
+    // Wait for up to 1.5x sensing windows before sensing independently and flag packet on timeout
+    data.timeout = (k_sem_take(&s_sensing_sem, K_SECONDS(3 * SENSING_INTERVAL_SEC / 2)) != 0);
+
+    uint32_t std  = 0;
+    uint32_t mean = 0;
+    for (size_t i = 0; i < SENSOR_SAMPLES; i++) {
+      s_adc_sequence.buffer = &adc_reading[i];
+
+      ret = adc_read(s_adc, &s_adc_sequence);
+      if (ret < 0) {
+        LOG_ERR("Could not read sensor: %d", ret);
+      }
+      uint16_t value = adc_reading[i];
+
+      LOG_DBG("Sensor digital reading %d: %d/%d", i, value, 2 << ADC_RES);
+
+      mean += value;
+      std += value * value;
+
+      k_sleep(K_MSEC(SENSOR_INTERVAL_MSEC));
     }
 
-    /* TODO:
-     * - Take mean of digital reading and convert to raw millivolts
-     * - Trigger this thread once per SENSING_WINDOW
-     * - Send sensor data
+    /*
+     * mean = E(x)
+     * std² = E{[x - E(x)]²} => E(x²) - E(x)²
+     *
+     * std_mean = std / sqrt(N)
      */
+    std /= SENSOR_SAMPLES;
+    mean /= SENSOR_SAMPLES;
+
+    std = (uint32_t)sqrtf(((float)std - mean * mean) / (SENSOR_SAMPLES - 1));
+
+    size_t count           = 0;
+    uint32_t filtered_mean = 0;
+    for (size_t i = 0; i < SENSOR_SAMPLES; i++) {
+      uint16_t value = adc_reading[i];
+
+      if (value >= mean - std && value <= mean + std) {
+        filtered_mean += value;
+        count++;
+      }
+    }
+
+    if (count) {
+      filtered_mean /= count;
+    }
+
+    ret = adc_raw_to_millivolts(s_vrefs[0], s_adc_cfgs[0].gain, ADC_RES, &filtered_mean);
+    if (ret < 0) {
+      LOG_ERR("Could not convert ADC reading to millivolts: %d", ret);
+    }
+
+    data.moisture = (uint16_t)filtered_mean;
+
+    ret = send(sock, &data, sizeof(data), 0);
+    if (ret < 0) {
+      LOG_ERR("Failed to send sensor UDP packet: %d", errno);
+    } else {
+      LOG_INF("Sent %d bytes to AP", ret);
+    }
+
+    k_sem_reset(&s_sensing_sem);
   }
 }
 
@@ -258,11 +327,12 @@ static void adc_init(void) {
     int err = adc_channel_setup(s_adc, &s_adc_cfgs[i]);
 
     if (err < 0) {
-      LOG_ERR("Could not setup channel #%d (%d)\n", s_adc_cfgs[i].channel_id, err);
-    } else {
-      s_adc_sequence.channels |= BIT(s_adc_cfgs[i].channel_id);
+      LOG_ERR("Could not setup channel #%d: %d\n", s_adc_cfgs[i].channel_id, err);
     }
   }
+
+  // Only setup first ADC sensor (for now)
+  s_adc_sequence.channels |= BIT(s_adc_cfgs[0].channel_id);
 }
 
 static void wifi_csi_init(void) {

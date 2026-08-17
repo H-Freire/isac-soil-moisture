@@ -224,7 +224,7 @@ static void probe_thread(void *, void *, void *) {
   int64_t next_wake_time = k_uptime_get();
   while (true) {
     for (size_t i = 0; i < SENSING_WINDOW_SIZE; i++) {
-      next_wake_time += SENSING_PERIOD_MS;
+      next_wake_time += SENSING_PERIOD_MSEC;
 
       esp_err_t ret = esp_wifi_80211_tx(WIFI_IF_AP, msg, sizeof(msg), true);
 
@@ -239,7 +239,7 @@ static void probe_thread(void *, void *, void *) {
       k_sleep(K_TIMEOUT_ABS_MS(next_wake_time));
     }
 
-    k_sleep(K_MSEC(1000 * SENSING_INTERVAL_SEC - SENSING_PERIOD_MS));
+    k_sleep(K_MSEC(1000 * SENSING_INTERVAL_SEC - SENSING_WINDOW_SIZE * SENSING_PERIOD_MSEC));
   }
 }
 
