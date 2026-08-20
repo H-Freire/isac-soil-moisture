@@ -134,7 +134,7 @@ void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     LOG_INF("Miscellaneous action frame, discarding...");
     return;
   }
-  const probe_msg_t *probe_msg = (probe_msg_t *)&msg->payload.probe;
+  const probe_data_t *probe_msg = (probe_data_t *)&msg->payload.probe;
 
   memcpy(frame.csi, info->buf, info->len);
   frame.rssi = rx_ctrl->rssi;
