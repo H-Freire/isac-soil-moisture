@@ -9,4 +9,9 @@ list(APPEND EXTRA_ZEPHYR_MODULES ${CMAKE_CURRENT_LIST_DIR}/../../modules/wifi_se
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(collector)
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE
+  src/csi.c
+  src/main.c
+  src/sensor.c
+)
+target_include_directories(app PRIVATE include)
