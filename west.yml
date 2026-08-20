@@ -22,5 +22,5 @@ manifest:
           - tf-psa-crypto
           - zcbor
   self:
-    path: apps
+    path: stations
 

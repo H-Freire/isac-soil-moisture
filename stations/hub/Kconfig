@@ -2,7 +2,7 @@
 
 # SPDX-License-Identifier: MIT
 
-menu "Sink"
+menu "Hub"
 
 config GOOGLE_SCRIPT_SECRET
     string "Google Apps Script API key"
