@@ -18,7 +18,6 @@ manifest:
           - hostap
           - loramac-node
           - mbedtls
-          - mcuboot
           - tf-psa-crypto
           - zcbor
   self:
