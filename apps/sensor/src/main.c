@@ -109,7 +109,7 @@ K_THREAD_DEFINE(sensors_read_id, SENSOR_STACK_SIZE, sensors_read_thread, NULL, N
                 SENSOR_PRIORITY, 0, 0);
 
 void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
-  csi_data_t frame;
+  wifi_metrics_t frame;
 
   if (!info || !info->buf) {
     LOG_WRN("<invalid arg> wifi_csi_cb. info: %p %" PRIu16 " %" PRIu16, info->buf, info->len,
@@ -118,6 +118,7 @@ void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
   }
   const wifi_pkt_rx_ctrl_t *rx_ctrl       = &info->rx_ctrl;
   const wifi_action_frame_t *action_frame = (wifi_action_frame_t *)info->hdr;
+  const msg_t *msg                        = (msg_t *)&action_frame->body;
 
   if (action_frame->frame_ctrl.subtype != ACTION_FRAME_SUBTYPE) {
     LOG_INF("Non action frame, discarding...");
@@ -129,15 +130,16 @@ void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     return;
   }
 
-  if (((probe_msg_t *)&action_frame->body)->magic != MSG_ID_PROBE) {
+  if (msg->hdr.id != MSG_ID_PROBE) {
     LOG_INF("Miscellaneous action frame, discarding...");
     return;
   }
+  const probe_msg_t *probe_msg = (probe_msg_t *)&msg->payload.probe;
 
   memcpy(frame.csi, info->buf, info->len);
   frame.rssi = rx_ctrl->rssi;
   frame.agc  = ((wifi_rx_ctrl_phy_t *)info)->agc_gain;
-  frame.seq  = ((probe_msg_t *)&action_frame->body)->seq;
+  frame.seq  = probe_msg->seq;
 
   LOG_INF("Received CSI frame with size %" PRIu16 ". RSSI: %d dBm. gain: %d, seq: %u", info->len,
           frame.rssi, frame.agc, frame.seq);
@@ -189,7 +191,7 @@ static int udp_sock(struct in_addr dest_addr) {
 }
 
 static void udp_client_thread(void *, void *, void *) {
-  static uint8_t msg_buf[MSG_COUNT][SENSOR_MSG_SIZE + MAX_MSG_PAYLOAD * SENSOR_DATA_SIZE];
+  static uint8_t msg_buf[MSG_COUNT][MSG_HDR_SIZE + MAX_MSG_PAYLOAD * CSI_DATA_SIZE];
 
   k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
 
@@ -200,16 +202,18 @@ static void udp_client_thread(void *, void *, void *) {
   while (true) {
     uint8_t count = 0;
     for (size_t tx = 0; tx < MSG_COUNT; tx++) {
-      sensor_msg_t *const msg = (sensor_msg_t *)msg_buf[tx];
+      msg_t *const msg = (msg_t *)msg_buf[tx];
+      msg->hdr.id      = MSG_ID_CSI;
 
+      csi_data_t *const pkt = (csi_data_t *)&msg->payload.csi;
       for (size_t i = 0; i < MAX_MSG_PAYLOAD; i++) {
         // Reception timed out (given the sensing window size)
-        if (k_msgq_get(&s_sensor_msgq, &msg->payload[i], K_SECONDS(SENSING_WINDOW_SEC))) {
+        if (k_msgq_get(&s_sensor_msgq, &pkt->data[i], K_SECONDS(SENSING_WINDOW_SEC))) {
           count += i > 0;
           goto transmit;
         }
-        memcpy(msg->payload[i].mac, s_mac_addr, MAC_ADDR_LEN);
-        msg->count++;
+        memcpy(pkt->data[i].mac, s_mac_addr, MAC_ADDR_LEN);
+        pkt->count++;
       }
       count++;
     }
@@ -225,7 +229,7 @@ static void udp_client_thread(void *, void *, void *) {
       k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
 
       int ret = send(sock, msg_buf[i],
-                     SENSOR_MSG_SIZE + ((sensor_msg_t *)msg_buf[i])->count * SENSOR_DATA_SIZE, 0);
+                     MSG_HDR_SIZE + ((msg_t *)msg_buf[i])->payload.csi.count * CSI_DATA_SIZE, 0);
 
       if (ret < 0) {
         LOG_ERR("Failed to send CSI UDP packet: %d", errno);
@@ -243,17 +247,22 @@ static void udp_client_thread(void *, void *, void *) {
 }
 
 static void sensors_read_thread(void *, void *, void *) {
-  sensor_data_t data;
+  msg_t msg = {
+      .hdr.id = MSG_ID_SENSORS,
+  };
+  sensor_data_t *pkt = &msg.payload.sensor;
+
   uint16_t adc_reading[SENSOR_SAMPLES];
 
   k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
+  memcpy(pkt->mac, s_mac_addr, sizeof(pkt->mac));
 
   int sock = udp_sock(s_ap_addr);
 
   int ret;
   while (true) {
     // Wait for up to 1.5x sensing windows before sensing independently and flag packet on timeout
-    data.timeout = (k_sem_take(&s_sensing_sem, K_SECONDS(3 * SENSING_INTERVAL_SEC / 2)) != 0);
+    pkt->timeout = (k_sem_take(&s_sensing_sem, K_SECONDS(3 * SENSING_INTERVAL_SEC / 2)) != 0);
 
     uint32_t std  = 0;
     uint32_t mean = 0;
@@ -305,15 +314,16 @@ static void sensors_read_thread(void *, void *, void *) {
       LOG_ERR("Could not convert ADC reading to millivolts: %d", ret);
     }
 
-    data.moisture = (uint16_t)filtered_mean;
+    pkt->moisture = (uint16_t)filtered_mean;
 
-    ret = send(sock, &data, sizeof(data), 0);
+    ret = send(sock, &msg, MSG_HDR_SIZE + SENSOR_DATA_SIZE, 0);
     if (ret < 0) {
       LOG_ERR("Failed to send sensor UDP packet: %d", errno);
     } else {
       LOG_INF("Sent %d bytes to AP", ret);
     }
 
+    // Ignore any possible signals given while executing thread
     k_sem_reset(&s_sensing_sem);
   }
 }

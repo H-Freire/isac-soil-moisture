@@ -10,8 +10,8 @@
 
 #include "wifi_sensing.h"
 
-#define LORA_MAGIC     0xDEADC0DE
-#define LORA_DATA_SIZE sizeof(lora_data_t)
+#define LORA_MAGIC    0xDEADC0DE
+#define LORA_HDR_SIZE sizeof(lora_msg_hdr_t)
 
 enum {
   LORA_DATA_ID    = 0x0987,
@@ -19,18 +19,25 @@ enum {
   LORA_ACK_REQ_ID = 0xABCD,
 };
 
-typedef uint16_t lora_msg_id_t;
-
 typedef struct {
   uint32_t magic;
-  lora_msg_id_t id;
+  uint16_t id;
+  uint16_t type;
+} PACKED lora_msg_hdr_t;
+
+typedef struct {
+  lora_msg_hdr_t hdr;
+
   unsigned bitmap : 10;
-} __attribute__((packed)) lora_ack_t;
+} PACKED lora_ack_t;
 
 typedef struct {
-  uint32_t magic;
-  lora_msg_id_t id;
-  sensor_data_t payload;
-} __attribute__((packed)) lora_data_t;
+  lora_msg_hdr_t hdr;
+
+  union {
+    wifi_metrics_t csi;
+    sensor_data_t sensor;
+  } payload;
+} PACKED lora_data_t;
 
 int lora_init(const struct device *lora_dev, bool tx);

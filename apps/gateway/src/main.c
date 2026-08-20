@@ -55,7 +55,7 @@ typedef struct {
 typedef struct {
   void *fifo_reserved;
   atomic_t refs;
-  uint8_t data[SENSOR_MSG_SIZE + MAX_MSG_PAYLOAD * SENSOR_DATA_SIZE];
+  uint8_t data[MSG_HDR_SIZE + MAX_MSG_PAYLOAD * SENSOR_DATA_SIZE];
 } csi_item_t;
 
 LOG_MODULE_REGISTER(gateway);
@@ -119,57 +119,84 @@ static void wifi_thread(void *, void *, void *) {
     socklen_t client_addr_len = sizeof(client_addr);
 
     // Allocate shared memory slab for received CSI data
-    csi_item_t *pkt;
-    k_mem_slab_alloc(&s_csi_slab, (void **)&pkt, K_FOREVER);
+    csi_item_t *item;
+    k_mem_slab_alloc(&s_csi_slab, (void **)&item, K_FOREVER);
 
-    ssize_t len = recvfrom(sock, &pkt->data, sizeof(pkt->data), 0, (struct sockaddr *)&client_addr,
-                           &client_addr_len);
+    ssize_t len = recvfrom(sock, &item->data, sizeof(item->data), 0,
+                           (struct sockaddr *)&client_addr, &client_addr_len);
 
     if (len < 0) {
       LOG_ERR("LoRa send failed (%zd)", len);
       continue;
     }
 
-    if ((len - 1) % sizeof(sensor_data_t)) {
-      LOG_ERR("Unexpected message size");
+    const uint16_t id = ((msg_t *)item->data)->hdr.id;
+    if (id != MSG_ID_CSI && id != MSG_ID_SENSORS) {
+      LOG_WRN("Unexpected message type");
       continue;
     }
 
     // Send shared allocated memory to both storage and lora threads (reference counting)
-    atomic_set(&pkt->refs, 2);
+    atomic_set(&item->refs, 2);
 
-    k_fifo_put(&storage_fifo, pkt);
-    k_fifo_put(&lora_fifo, pkt);
+    k_fifo_put(&storage_fifo, item);
+    k_fifo_put(&lora_fifo, item);
   }
 }
 
 static void lora_thread(void *, void *, void *) {
   // lora_ack_t ack;
   // struct k_timer ack_timer;
-  csi_item_t *pkt;
+  csi_item_t *item;
 
   lora_data_t data = {
-      .magic = LORA_MAGIC,
-      .id    = LORA_DATA_ID,
+      .hdr =
+          {
+              .magic = LORA_MAGIC,
+              .id    = LORA_DATA_ID,
+          },
   };
 
   // k_timer_init(&ack_timer, NULL, NULL);
 
   while (true) {
-    pkt = (csi_item_t *)k_fifo_get(&lora_fifo, K_FOREVER);
+    item = (csi_item_t *)k_fifo_get(&lora_fifo, K_FOREVER);
 
-    const sensor_msg_t *const msg = (sensor_msg_t *)pkt->data;
-    for (size_t i = 0; i < msg->count; i++) {
-      memcpy((uint8_t *)&data.payload, (uint8_t *)&msg->payload[i], SENSOR_DATA_SIZE);
+    const msg_t *const msg = (msg_t *)item->data;
 
-      int ret = lora_send(s_lora_dev, (uint8_t *)&data, LORA_DATA_SIZE);
+    switch (msg->hdr.id) {
+    case MSG_ID_SENSORS: {
+      const sensor_data_t *const pkt = (sensor_data_t *)&msg->payload.sensor;
+
+      memcpy((uint8_t *)&data.payload.sensor, (uint8_t *)pkt, SENSOR_DATA_SIZE);
+      data.hdr.type = MSG_ID_SENSORS;
+
+      int ret = lora_send(s_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + SENSOR_DATA_SIZE);
       if (ret < 0) {
-        LOG_ERR("LoRa send failed");
+        LOG_ERR("LoRa sensor send failed");
       }
+      break;
+    }
+    case MSG_ID_CSI: {
+      const csi_data_t *const pkt = (csi_data_t *)&msg->payload.csi;
+      for (size_t i = 0; i < pkt->count; i++) {
+        memcpy((uint8_t *)&data.payload.csi, (uint8_t *)&pkt->data[i], CSI_DATA_SIZE);
+        data.hdr.type = MSG_ID_CSI;
+
+        int ret = lora_send(s_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + CSI_DATA_SIZE);
+        if (ret < 0) {
+          LOG_ERR("LoRa CSI send failed");
+        }
+      }
+      break;
+    }
+    default:
+      LOG_WRN("Unrecognized message received");
+      break;
     }
 
-    if (atomic_dec(&pkt->refs) == 1) {
-      k_mem_slab_free(&s_csi_slab, (void *)pkt);
+    if (atomic_dec(&item->refs) == 1) {
+      k_mem_slab_free(&s_csi_slab, (void *)item);
     }
 
     /* TODO: ACK request */
@@ -200,13 +227,12 @@ static void lora_thread(void *, void *, void *) {
 }
 
 static void probe_thread(void *, void *, void *) {
-  static uint8_t msg[sizeof(wifi_action_frame_t) + PROBE_MSG_SIZE];
+  static uint8_t msg[sizeof(wifi_action_frame_t) + MSG_HDR_SIZE + PROBE_DATA_SIZE];
 
   k_event_wait(&net_events, NET_READY, false, K_FOREVER);
   const struct net_linkaddr *link_addr = net_if_get_link_addr(s_iface);
 
   wifi_action_frame_t *const frame = (wifi_action_frame_t *)&msg;
-  probe_msg_t *const probe         = (probe_msg_t *)&frame->body;
 
   *frame = (wifi_action_frame_t){
       .frame_ctrl.subtype = ACTION_FRAME_SUBTYPE, // Action frame
@@ -217,9 +243,10 @@ static void probe_thread(void *, void *, void *) {
   memcpy(frame->sa, link_addr->addr, MAC_ADDR_LEN);
   memcpy(frame->bss, link_addr->addr, MAC_ADDR_LEN);
 
-  *probe = (probe_msg_t){
-      .magic = MSG_ID_PROBE,
-  };
+  msg_hdr_t *const hdr = (msg_hdr_t *)frame->body;
+  hdr->id              = MSG_ID_PROBE;
+
+  probe_data_t *const probe = (probe_data_t *)&((msg_t *)frame->body)->payload.probe;
 
   int64_t next_wake_time = k_uptime_get();
   while (true) {
@@ -245,13 +272,36 @@ static void probe_thread(void *, void *, void *) {
 
 static void storage_thread(void *, void *, void *) {
   csi_item_t *pkt;
-  file_node_t open_files[MAX_DEVICES] = {};
+  // Lower half corresponds to CSI files, while the upper half corresponds to reference sensors
+  file_node_t open_files[2 * MAX_DEVICES] = {};
 
   while (true) {
+    void *write_data;
+    size_t write_size, start_idx, end_idx;
+    const uint8_t (*mac_addr)[MAC_ADDR_LEN];
+
     pkt = k_fifo_get(&storage_fifo, K_FOREVER);
 
-    const sensor_msg_t *const sensor_msg          = (const sensor_msg_t *)pkt->data;
-    const uint8_t (*const mac_addr)[MAC_ADDR_LEN] = &sensor_msg->payload[0].mac;
+    const msg_t *const msg = (const msg_t *)pkt->data;
+    switch (msg->hdr.id) {
+    case MSG_ID_CSI:
+      start_idx  = 0;
+      end_idx    = MAX_DEVICES;
+      write_data = (void *)msg->payload.csi.data;
+      write_size = msg->payload.csi.count * CSI_DATA_SIZE;
+      mac_addr   = &msg->payload.csi.data[0].mac;
+      break;
+    case MSG_ID_SENSORS:
+      start_idx  = MAX_DEVICES;
+      end_idx    = 2 * MAX_DEVICES;
+      write_data = (void *)&msg->payload.sensor;
+      write_size = SENSOR_DATA_SIZE;
+      mac_addr   = &msg->payload.sensor.mac;
+      break;
+    default:
+      LOG_WRN("Unexpected message type");
+      continue;
+    }
 
     uint32_t dev_key =
         (*mac_addr[2] << 24) | (*mac_addr[3] << 16) | (*mac_addr[4] << 8) | *mac_addr[5];
@@ -260,7 +310,7 @@ static void storage_thread(void *, void *, void *) {
     int8_t target_idx = -1;
 
     /* Search for an open file */
-    for (size_t i = 0; i < MAX_DEVICES; i++) {
+    for (size_t i = start_idx; i < end_idx; i++) {
       if (open_files[i].is_open && open_files[i].key == dev_key) {
         target_idx = i;
         break;
@@ -272,16 +322,27 @@ static void storage_thread(void *, void *, void *) {
 
     /* Create new file (none open for the given device) */
     if (target_idx == -1 && free_idx != -1) {
-      char file_path[32];
-      snprintf(file_path, sizeof(file_path), DISK_MOUNT_PT "/" MACSTR ".bin", MAC2STR(*mac_addr));
+      char file_path[40];
+
+      /*
+       * Filename for MAC address 01:23:45:67:89
+       *
+       * CSI    file: 01-23-45-67-89_csi.bin
+       * Sensor file: 01-23-45-67-89_sensor.bin
+       *
+       */
+      snprintf(file_path, sizeof(file_path),
+               DISK_MOUNT_PT "/" MACSTR "%s"
+                             ".bin",
+               MAC2STR(*mac_addr), free_idx < MAX_DEVICES ? "_csi" : "_sensor");
 
       fs_file_t_init(&open_files[free_idx].file);
 
       if (fs_open(&open_files[free_idx].file, file_path, FS_O_CREATE | FS_O_APPEND | FS_O_WRITE) ==
           0) {
-        open_files[free_idx].is_open = true;
-        open_files[free_idx].key     = dev_key;
         target_idx                   = free_idx;
+        open_files[free_idx].key     = dev_key;
+        open_files[free_idx].is_open = true;
 
         LOG_INF("Opened new file stream for " MACSTR " at index %d", MAC2STR(*mac_addr),
                 target_idx);
@@ -294,8 +355,7 @@ static void storage_thread(void *, void *, void *) {
       continue;
     }
 
-    fs_write(&open_files[target_idx].file, sensor_msg->payload,
-             sensor_msg->count * SENSOR_DATA_SIZE);
+    fs_write(&open_files[target_idx].file, write_data, write_size);
 
     if (atomic_dec(&pkt->refs) == 1) {
       k_mem_slab_free(&s_csi_slab, (void *)pkt);

@@ -13,12 +13,14 @@
 #define ACTION_FRAME_SUBTYPE 0b1101
 
 #define NET_READY 0x01
+#define PACKED    __attribute__((packed))
 
 #define MAX_DEVICES      4
 #define MAX_MSG_PAYLOAD  10
-#define SENSOR_MSG_SIZE  sizeof(sensor_msg_t)
+#define MSG_HDR_SIZE     sizeof(msg_hdr_t)
+#define CSI_DATA_SIZE    sizeof(csi_data_t)
 #define SENSOR_DATA_SIZE sizeof(sensor_data_t)
-#define PROBE_MSG_SIZE   sizeof(probe_msg_t)
+#define PROBE_DATA_SIZE  sizeof(probe_data_t)
 
 #define SENSING_RATE_HZ      10
 #define SENSING_WINDOW_SIZE  100
@@ -44,12 +46,9 @@ enum {
   MSG_ID_SENSORS = 0xBEEF,
 };
 
-typedef uint16_t msg_id_t;
-
 typedef struct {
-  uint32_t seq;
-  msg_id_t magic;
-} __attribute__((packed)) probe_msg_t;
+  uint16_t id;
+} PACKED msg_hdr_t;
 
 typedef struct {
   uint32_t seq;
@@ -58,22 +57,35 @@ typedef struct {
   uint8_t agc;
   int8_t rssi;
   int8_t csi[128];
-} __attribute__((packed)) csi_data_t;
+} PACKED wifi_metrics_t;
+
+typedef struct {
+  uint8_t count;
+  wifi_metrics_t data[];
+} PACKED csi_data_t;
 
 typedef struct {
   uint16_t temp;
   uint16_t moisture;
+  uint8_t mac[MAC_ADDR_LEN];
 
   // Whether the data collection happened because of a timeout
   bool timeout;
-} __attribute__((packed)) sensor_data_t;
+} PACKED sensor_data_t;
 
 typedef struct {
-  msg_id_t id;
-  uint8_t count;
+  uint32_t seq;
+} PACKED probe_data_t;
 
-  csi_data_t payload[];
-} __attribute__((packed)) sensor_msg_t;
+typedef struct {
+  msg_hdr_t hdr;
+
+  union {
+    csi_data_t csi;
+    sensor_data_t sensor;
+    probe_data_t probe;
+  } payload;
+} PACKED msg_t;
 
 typedef struct {
   /** Frame control fields */
@@ -87,7 +99,7 @@ typedef struct {
     unsigned retry : 1;
     unsigned pwr_mgmt : 1;
     unsigned : 3;
-  } __attribute__((packed)) frame_ctrl;
+  } PACKED frame_ctrl;
 
   uint16_t duration_id;
 
@@ -103,7 +115,7 @@ typedef struct {
 
   /** Action frame payload */
   uint8_t body[];
-} __attribute__((packed)) wifi_action_frame_t;
+} PACKED wifi_action_frame_t;
 
 extern const uint8_t g_broadcast_addr[MAC_ADDR_LEN];
 

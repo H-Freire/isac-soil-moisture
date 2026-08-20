@@ -2,7 +2,7 @@
 
 # SPDX-License-Identifier: MIT
 
-mainmenu "Sink"
+menu "Sink"
 
 config GOOGLE_SCRIPT_SECRET
     string "Google Apps Script API key"
@@ -19,5 +19,7 @@ config GOOGLE_SCRIPT_HOST
     default "script.google.com"
     help
       Google Apps Script domain.
+
+endmenu
 
 source "Kconfig.zephyr"

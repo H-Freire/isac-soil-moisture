@@ -42,8 +42,9 @@ static const struct device *s_lora_dev = DEVICE_DT_GET(LORA_NODE);
 
 K_SEM_DEFINE(google_sem, 0, 1);
 
-static size_t s_msg_count;
-static lora_data_t s_csi_msg_buf[MAX_MSGS];
+static size_t s_sensor_msg_count, s_csi_msg_count;
+static uint8_t s_sensor_msg_buf[MAX_DEVICES * (LORA_HDR_SIZE + SENSOR_DATA_SIZE)];
+static lora_data_t s_csi_msg_buf[MAX_MSGS] __attribute__((section(".noinit.buf")));
 
 K_THREAD_DEFINE(lora_thread_id, LORA_STACK_SIZE, lora_thread, NULL, NULL, NULL, LORA_PRIORITY, 0,
                 0);
@@ -78,18 +79,16 @@ static int http_response_cb(struct http_response *rsp, enum http_final_call fina
   return 0;
 }
 
-static int upload_to_google(int sock, const lora_data_t *data, size_t count) {
+static int upload_to_google(int sock, const uint8_t *data, const size_t len) {
   static const char *const headers[] = {
       "Content-Type: " CONTENT_TYPE "\r\n",
       "X-API-Key: " CONFIG_GOOGLE_SCRIPT_SECRET "\r\n",
       NULL,
   };
 
-  if (!count) {
+  if (!len) {
     return 0;
   }
-
-  const size_t body_len = count * LORA_DATA_SIZE;
 
   struct http_request req = {
       .method        = HTTP_POST,
@@ -97,8 +96,8 @@ static int upload_to_google(int sock, const lora_data_t *data, size_t count) {
       .host          = CONFIG_GOOGLE_SCRIPT_HOST,
       .protocol      = "HTTP/1.1",
       .header_fields = headers,
-      .payload       = (uint8_t *)data,
-      .payload_len   = body_len,
+      .payload       = data,
+      .payload_len   = len,
       .response      = http_response_cb,
   };
 
@@ -123,7 +122,8 @@ static void lora_thread(void *, void *, void *) {
     k_timer_init(&recv_timer, NULL, NULL);
 
     lora_data_t *pkt;
-    size_t msg_count = 0;
+    size_t csi_msg_count    = 0;
+    size_t sensor_msg_count = 0;
     for (size_t i = 0; i < MAX_MSGS && timeout.ticks > 0; i++) {
       pkt = &s_csi_msg_buf[i];
 
@@ -134,18 +134,32 @@ static void lora_thread(void *, void *, void *) {
         continue;
       }
 
-      if (pkt->magic != LORA_MAGIC) {
+      if (pkt->hdr.magic != LORA_MAGIC) {
         LOG_ERR("LoRa message not intended for device");
         continue;
       }
 
-      switch (pkt->id) {
-      case LORA_DATA_ID:
+      switch (pkt->hdr.id) {
+      case LORA_DATA_ID: {
         if (!i) {
           k_timer_start(&recv_timer, K_SECONDS(SENSING_INTERVAL_SEC - 120), K_FOREVER);
         }
-        msg_count++;
+
+        if (pkt->hdr.type == MSG_ID_SENSORS) {
+          static size_t s_sensor_msg_idx;
+
+          memcpy(&s_sensor_msg_buf[s_sensor_msg_idx], (uint8_t *)pkt,
+                 LORA_HDR_SIZE + SENSOR_DATA_SIZE);
+          s_sensor_msg_idx =
+              (s_sensor_msg_idx + LORA_HDR_SIZE + SENSOR_DATA_SIZE) % sizeof(s_sensor_msg_buf);
+
+          i--;
+          sensor_msg_count++;
+        } else { // MSG_ID_CSI
+          csi_msg_count++;
+        }
         break;
+      }
       case LORA_ACK_REQ_ID:
       default:
         break;
@@ -155,7 +169,8 @@ static void lora_thread(void *, void *, void *) {
       LOG_HEXDUMP_DBG(&pkt->payload, len, "Sensor msg payload");
     }
 
-    s_msg_count = msg_count;
+    s_csi_msg_count    = csi_msg_count;
+    s_sensor_msg_count = sensor_msg_count;
     k_sem_give(&google_sem);
   }
 }
@@ -215,7 +230,10 @@ static void google_thread(void *, void *, void *) {
       continue;
     }
 
-    upload_to_google(sock, s_csi_msg_buf, s_msg_count);
+    upload_to_google(sock, (uint8_t *)s_csi_msg_buf,
+                     s_csi_msg_count * (LORA_HDR_SIZE + CSI_DATA_SIZE));
+    upload_to_google(sock, s_sensor_msg_buf,
+                     s_sensor_msg_count * (LORA_HDR_SIZE + SENSOR_DATA_SIZE));
   }
 }
 
