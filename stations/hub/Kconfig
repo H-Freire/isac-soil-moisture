@@ -4,21 +4,21 @@
 
 menu "Hub"
 
-config GOOGLE_SCRIPT_SECRET
-    string "Google Apps Script API key"
+config SERVER_SECRET
+    string "Server API key"
     help
-      Secret API key for HTTP POST on script.
+      Secret API key for HTTP POST on server.
 
-config GOOGLE_SCRIPT_URL
-    string "Google Apps Script URL"
+config SERVER_URL
+    string "Server URL"
     help
-      Google Apps Script script path (macros/s/<script_id>/exec).
+      Server path (macros/s/<script_id>/exec for Google Apps Script).
 
-config GOOGLE_SCRIPT_HOST
-    string "Google Apps Script domain"
+config SERVER_HOST
+    string "Server domain"
     default "script.google.com"
     help
-      Google Apps Script domain.
+      Server domain.
 
 endmenu
 
