@@ -45,7 +45,7 @@ The board should have a LoRa radio. The target tested for this role is `ttgo_lor
 
 ## Modules
 
-The `modules/` directory contains project-specific Zephyr modules shared by the applications. These provide reusable drivers, libraries, and other functionality that is not part of the applications themselves.
+The `modules/` directory contains project-specific Zephyr modules shared by the applications. These provide reusable functions and common parameters to all stations.
 
 ## Install
 
