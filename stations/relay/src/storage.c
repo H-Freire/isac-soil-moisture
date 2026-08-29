@@ -68,23 +68,26 @@ static void storage_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
 
     const msg_t *const msg = (const msg_t *)pkt->data;
     switch (msg->hdr.id) {
-    case MSG_ID_CSI:
+    case MSG_ID_CSI: {
       start_idx  = 0;
       end_idx    = MAX_DEVICES;
       write_data = (void *)msg->payload.csi.data;
       write_size = msg->payload.csi.count * CSI_DATA_SIZE;
       mac_addr   = &msg->payload.csi.data[0].mac;
       break;
-    case MSG_ID_SENSORS:
+    }
+    case MSG_ID_SENSORS: {
       start_idx  = MAX_DEVICES;
       end_idx    = 2 * MAX_DEVICES;
       write_data = (void *)&msg->payload.sensor;
       write_size = SENSOR_DATA_SIZE;
       mac_addr   = &msg->payload.sensor.mac;
       break;
-    default:
+    }
+    default: {
       LOG_WRN("Unexpected message type");
       continue;
+    }
     }
 
     uint32_t dev_key =

@@ -71,9 +71,10 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
       }
       break;
     }
-    default:
+    default: {
       LOG_WRN("Unrecognized message received");
       break;
+    }
     }
 
     if (atomic_dec(&item->refs) == 1) {

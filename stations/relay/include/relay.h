@@ -16,7 +16,7 @@
 typedef struct {
   void *fifo_reserved;
   atomic_t refs;
-  uint8_t data[MSG_HDR_SIZE + MAX_MSG_PAYLOAD * SENSOR_DATA_SIZE];
+  uint8_t data[MSG_HDR_SIZE + MAX_MSG_PAYLOAD * CSI_DATA_SIZE];
 } csi_item_t;
 
 extern const struct device *g_lora_dev;

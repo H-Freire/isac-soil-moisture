@@ -116,19 +116,24 @@ static void wifi_rx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
     csi_item_t *item;
     k_mem_slab_alloc(&g_csi_slab, (void **)&item, K_FOREVER);
 
-    ssize_t len = recvfrom(sock, &item->data, sizeof(item->data), 0,
-                           (struct sockaddr *)&client_addr, &client_addr_len);
+    ssize_t len = recvfrom(sock, item->data, sizeof(item->data), 0, (struct sockaddr *)&client_addr,
+                           &client_addr_len);
 
     if (len < 0) {
-      LOG_ERR("LoRa send failed (%zd)", len);
+      LOG_ERR("Wi-Fi recv failed (%zd)", len);
+      k_mem_slab_free(&g_csi_slab, (void *)item);
       continue;
     }
 
     const uint16_t id = ((msg_t *)item->data)->hdr.id;
     if (id != MSG_ID_CSI && id != MSG_ID_SENSORS) {
       LOG_WRN("Unexpected message type");
+      k_mem_slab_free(&g_csi_slab, (void *)item);
       continue;
     }
+
+    LOG_INF("Received %zd bytes from STA", len);
+    LOG_HEXDUMP_INF(((msg_t *)item->data)->payload.csi.data, CSI_DATA_SIZE, "CSI data: ");
 
     // Send shared allocated memory to both storage and lora threads (reference counting)
     atomic_set(&item->refs, 2);
@@ -160,8 +165,9 @@ static void wifi_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
 
   probe_data_t *const probe = (probe_data_t *)&((msg_t *)frame->body)->payload.probe;
 
-  int64_t next_wake_time = k_uptime_get();
   while (true) {
+    int64_t next_wake_time = k_uptime_get();
+
     for (size_t i = 0; i < SENSING_WINDOW_SIZE; i++) {
       next_wake_time += SENSING_PERIOD_MSEC;
 
