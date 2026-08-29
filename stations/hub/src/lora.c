@@ -32,60 +32,62 @@ static void lora_rx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
 
   while (true) {
     // lora_ack_t ack;
-    // Non-null starting value to execute the loop once before activating the timer
-    k_timeout_t timeout = {
-        .ticks = 1,
-    };
-    struct k_timer recv_timer;
-
-    k_timer_init(&recv_timer, NULL, NULL);
+    // Unset deadline
+    k_timepoint_t deadline = sys_timepoint_calc(K_FOREVER);
 
     lora_data_t *pkt;
     size_t csi_msg_count    = 0;
     size_t sensor_msg_count = 0;
-    for (size_t i = 0; i < MAX_MSGS && timeout.ticks > 0; i++) {
-      pkt = &g_csi_msg_buf[i];
 
-      int len = lora_recv(g_lora_dev, (uint8_t *)pkt, sizeof(*pkt), timeout, &rssi, &snr);
+    {
+      size_t i;
+      k_timeout_t timeout;
+      for (i = 0, timeout = K_FOREVER; i < MAX_MSGS && !K_TIMEOUT_EQ(timeout, K_NO_WAIT);
+           i++, timeout   = sys_timepoint_timeout(deadline)) {
+        pkt = &g_csi_msg_buf[i];
 
-      if (len < 0) {
-        LOG_ERR("LoRa recv failed (%d)", len);
-        continue;
-      }
+        int len = lora_recv(g_lora_dev, (uint8_t *)pkt, sizeof(*pkt), timeout, &rssi, &snr);
 
-      if (pkt->hdr.magic != LORA_MAGIC) {
-        LOG_ERR("LoRa message not intended for device");
-        continue;
-      }
-
-      switch (pkt->hdr.id) {
-      case LORA_DATA_ID: {
-        if (!i) {
-          k_timer_start(&recv_timer, K_SECONDS(SENSING_INTERVAL_SEC - 120), K_FOREVER);
+        if (len < 0) {
+          LOG_ERR("LoRa recv failed (%d)", len);
+          continue;
         }
 
-        if (pkt->hdr.type == MSG_ID_SENSORS) {
-          static size_t s_sensor_msg_idx;
-
-          memcpy(&g_sensor_msg_buf[s_sensor_msg_idx], (uint8_t *)pkt,
-                 LORA_HDR_SIZE + SENSOR_DATA_SIZE);
-          s_sensor_msg_idx =
-              (s_sensor_msg_idx + LORA_HDR_SIZE + SENSOR_DATA_SIZE) % sizeof(g_sensor_msg_buf);
-
-          i--;
-          sensor_msg_count++;
-        } else { // MSG_ID_CSI
-          csi_msg_count++;
+        if (pkt->hdr.magic != LORA_MAGIC) {
+          LOG_ERR("LoRa message not intended for device");
+          continue;
         }
-        break;
-      }
-      case LORA_ACK_REQ_ID:
-      default:
-        break;
-      }
 
-      LOG_DBG("LoRa RX RSSI: %d dBm, SNR: %d db", rssi, snr);
-      LOG_HEXDUMP_DBG(&pkt->payload, len, "Sensor msg payload");
+        switch (pkt->hdr.id) {
+        case LORA_DATA_ID: {
+          if (!i) {
+            // Set deadline after first valid message received
+            deadline = sys_timepoint_calc(K_SECONDS(SENSING_INTERVAL_SEC - 120));
+          }
+
+          if (pkt->hdr.type == MSG_ID_SENSORS) {
+            static size_t s_sensor_msg_idx;
+
+            memcpy(&g_sensor_msg_buf[s_sensor_msg_idx], (uint8_t *)pkt,
+                   LORA_HDR_SIZE + SENSOR_DATA_SIZE);
+            s_sensor_msg_idx =
+                (s_sensor_msg_idx + LORA_HDR_SIZE + SENSOR_DATA_SIZE) % sizeof(g_sensor_msg_buf);
+
+            i--;
+            sensor_msg_count++;
+          } else { // MSG_ID_CSI
+            csi_msg_count++;
+          }
+          break;
+        }
+        case LORA_ACK_REQ_ID:
+        default:
+          break;
+        }
+
+        LOG_DBG("LoRa RX RSSI: %d dBm, SNR: %d db", rssi, snr);
+        LOG_HEXDUMP_DBG(&pkt->payload, len, "Sensor msg payload");
+      }
     }
 
     g_csi_msg_count    = csi_msg_count;

@@ -24,7 +24,7 @@ lora_data_t g_csi_msg_buf[MAX_MSGS] __attribute__((section(".noinit.buf")));
 K_SEM_DEFINE(g_google_sem, 0, 1);
 
 int main(void) {
-  LOG_INF("Starting LoRa sink");
+  LOG_INF("Starting hub");
 
   net_register(NULL);
 
