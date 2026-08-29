@@ -22,6 +22,7 @@ static void net_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_
 const uint8_t g_broadcast_addr[MAC_ADDR_LEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
 K_EVENT_DEFINE(g_net_events);
+
 static struct in_addr *s_ap_addr;
 static struct net_mgmt_event_callback s_net_ipv4_cb;
 static struct net_mgmt_event_callback s_net_wifi_cb;
@@ -37,6 +38,11 @@ void ap_connect(uint8_t *mac_addr) {
   struct wifi_connect_req_params sta_config = {
       .ssid        = CONFIG_WIFI_SSID,
       .ssid_length = strlen(CONFIG_WIFI_SSID),
+#if (CONFIG_WIFI_CHANNEL == 0)
+      .channel = WIFI_CHANNEL_ANY,
+#else
+      .channel = CONFIG_WIFI_CHANNEL,
+#endif
 #if CONFIG_WIFI_WPA_ENTERPRISE
       .security          = WIFI_SECURITY_TYPE_EAP_TTLS_MSCHAPV2,
       .eap_identity      = CONFIG_WIFI_EAP_ID,
@@ -45,11 +51,9 @@ void ap_connect(uint8_t *mac_addr) {
       .eap_passwd_length = strlen(CONFIG_WIFI_EAP_PASSWD),
 #else
       .security   = WIFI_SECURITY_TYPE_PSK,
-      .channel    = CONFIG_WIFI_CHANNEL,
       .psk        = CONFIG_WIFI_PSK,
       .psk_length = strlen(CONFIG_WIFI_PSK),
 #endif
-
   };
 
   LOG_INF("Connecting to SSID: %s\n", sta_config.ssid);

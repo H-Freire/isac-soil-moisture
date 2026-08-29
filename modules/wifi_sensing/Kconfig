@@ -19,6 +19,7 @@ config WIFI_SSID
 config WIFI_CHANNEL
     int "Wi-Fi operating channel"
     default 1
+    range 0 13
     help
       Wi-Fi channel for both sensing and communication.
 

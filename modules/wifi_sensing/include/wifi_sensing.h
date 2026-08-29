@@ -18,7 +18,7 @@
 #define MAX_DEVICES      4
 #define MAX_MSG_PAYLOAD  10
 #define MSG_HDR_SIZE     sizeof(msg_hdr_t)
-#define CSI_DATA_SIZE    sizeof(csi_data_t)
+#define CSI_DATA_SIZE    sizeof(wifi_metrics_t)
 #define SENSOR_DATA_SIZE sizeof(sensor_data_t)
 #define PROBE_DATA_SIZE  sizeof(probe_data_t)
 
