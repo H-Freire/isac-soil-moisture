@@ -18,7 +18,7 @@
 #define CSI_PRIORITY   4
 #define CSI_STACK_SIZE 2048
 
-#define QUEUE_SIZE 30
+#define QUEUE_SIZE 40
 #define MSG_COUNT  (SENSING_WINDOW_SIZE / MAX_MSG_PAYLOAD)
 
 typedef struct {
@@ -53,7 +53,7 @@ LOG_MODULE_DECLARE(collector);
 static void csi_thread(void *, void *, void *);
 
 K_TIMER_DEFINE(s_sensing_timer, NULL, NULL);
-K_MSGQ_DEFINE(s_sensor_msgq, SENSOR_DATA_SIZE, QUEUE_SIZE, 4);
+K_MSGQ_DEFINE(s_csi_msgq, CSI_DATA_SIZE, QUEUE_SIZE, 4);
 
 K_THREAD_DEFINE(csi_tid, CSI_STACK_SIZE, csi_thread, NULL, NULL, NULL, CSI_PRIORITY, 0, 0);
 
@@ -93,7 +93,7 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
   LOG_INF("Received CSI frame with size %" PRIu16 ". RSSI: %d dBm. gain: %d, seq: %u", info->len,
           frame.rssi, frame.agc, frame.seq);
 
-  if (!k_msgq_put(&s_sensor_msgq, &frame, K_NO_WAIT)) {
+  if (!k_msgq_put(&s_csi_msgq, &frame, K_NO_WAIT)) {
     LOG_INF("CSI frame collected [%d dBm]", frame.rssi);
   } else {
     LOG_ERR("Failed to send CSI frame");
@@ -143,25 +143,28 @@ static void csi_thread(void *p1 __unused, void *p2 __unused, void *p3 __unused) 
 
   int sock = udp_socket_open(g_ap_addr);
 
-  esp_wifi_set_csi(true);
-
   while (true) {
+    enable_antenna(EXT_ANT);
+    esp_wifi_set_csi(true);
+
     uint8_t count = 0;
     for (size_t tx = 0; tx < MSG_COUNT; tx++) {
       msg_t *const msg = (msg_t *)msg_buf[tx];
       msg->hdr.id      = MSG_ID_CSI;
+      count++;
 
       csi_data_t *const pkt = (csi_data_t *)&msg->payload.csi;
+      pkt->count            = 0;
       for (size_t i = 0; i < MAX_MSG_PAYLOAD; i++) {
-        // Reception timed out (given the sensing window size)
-        if (k_msgq_get(&s_sensor_msgq, &pkt->data[i], K_SECONDS(SENSING_WINDOW_SEC))) {
-          count += i > 0;
+        // Reception timeout after one sensing window
+        k_timeout_t timeout = i ? K_SECONDS(SENSING_WINDOW_SEC) : K_FOREVER;
+
+        if (k_msgq_get(&s_csi_msgq, &pkt->data[i], timeout)) {
           goto transmit;
         }
         memcpy(pkt->data[i].mac, g_mac_addr, MAC_ADDR_LEN);
         pkt->count++;
       }
-      count++;
     }
   transmit:
     esp_wifi_set_csi(false);
@@ -186,8 +189,5 @@ static void csi_thread(void *p1 __unused, void *p2 __unused, void *p3 __unused) 
 
     // Block until next sensing window
     k_timer_status_sync(&s_sensing_timer);
-
-    enable_antenna(EXT_ANT);
-    esp_wifi_set_csi(true);
   }
 }
