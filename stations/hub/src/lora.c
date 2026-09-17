@@ -13,7 +13,7 @@
 #include "hub.h"
 
 #define LORA_RX_PRIORITY   4
-#define LORA_RX_STACK_SIZE 4096
+#define LORA_RX_STACK_SIZE 2048
 
 BUILD_ASSERT(DT_NODE_HAS_STATUS_OKAY(LORA_NODE), "No default LoRa radio specified in DT");
 
