@@ -28,10 +28,10 @@ static struct net_mgmt_event_callback s_net_ipv4_cb;
 static struct net_mgmt_event_callback s_net_wifi_cb;
 
 void ap_connect(uint8_t *mac_addr) {
-  struct net_if *iface     = net_if_get_wifi_sta();
-  struct net_linkaddr *mac = net_if_get_link_addr(iface);
+  struct net_if *iface = net_if_get_wifi_sta();
 
   if (mac_addr) {
+    struct net_linkaddr *mac = net_if_get_link_addr(iface);
     memcpy(mac_addr, mac->addr, MAC_ADDR_LEN);
   }
 
@@ -56,7 +56,7 @@ void ap_connect(uint8_t *mac_addr) {
 #endif
   };
 
-  LOG_INF("Connecting to SSID: %s\n", sta_config.ssid);
+  LOG_INF("Connecting to SSID: %s", sta_config.ssid);
   int ret = net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &sta_config, sizeof(sta_config));
   if (ret) {
     LOG_ERR("NET_REQUEST_WIFI_CONNECT failed, err: %d", ret);
@@ -80,7 +80,7 @@ static void net_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_
 
   case NET_EVENT_WIFI_CONNECT_RESULT: {
     if (status && status->status) {
-      LOG_ERR("Failed to connect to %s", CONFIG_WIFI_SSID);
+      LOG_ERR("Failed to connect to %s (%d)", CONFIG_WIFI_SSID, status->status);
     } else {
       LOG_INF("Connected to %s", CONFIG_WIFI_SSID);
     }

@@ -33,6 +33,7 @@ typedef struct {
 
 typedef struct {
   lora_msg_hdr_t hdr;
+  uint64_t timestamp_sec;
 
   union {
     wifi_metrics_t csi;
