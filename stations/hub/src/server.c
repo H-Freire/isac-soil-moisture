@@ -33,10 +33,13 @@ K_THREAD_DEFINE(server_tx_tid, SERVER_TX_STACK_SIZE, server_tx_thread, NULL, NUL
 
 static int http_response_cb(struct http_response *rsp, enum http_final_call final_data,
                             void *user_data) {
-  static int response_len;
-  static char response_buf[RESPONSE_BUF_SIZE];
+  LOG_INF("HTTP status: %u (%s)", rsp->http_status_code, rsp->http_status);
 
-  if (rsp->body_found && rsp->body_frag_len > 0) {
+  /*
+    static int response_len;
+    static char response_buf[RESPONSE_BUF_SIZE];
+
+    if (rsp->body_found && rsp->body_frag_len > 0) {
     size_t copy = MIN(rsp->body_frag_len, RESPONSE_BUF_SIZE - response_len - 1);
     memcpy(&response_buf[response_len], rsp->body_frag_start, copy);
 
@@ -50,16 +53,17 @@ static int http_response_cb(struct http_response *rsp, enum http_final_call fina
     if (!strcmp(response_buf, "OK")) {
       LOG_INF("Data upload successful");
     } else {
-      LOG_ERR("Upload failed");
+      LOG_ERR("Upload failed: %s", response_buf);
     }
 
     response_len = 0;
-  }
+  }*/
 
   return 0;
 }
 
 static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
+  static uint8_t recv_buf[512];
   static const char *const headers[] = {
       "Content-Type: " CONTENT_TYPE "\r\n",
       "X-API-Key: " CONFIG_SERVER_SECRET "\r\n",
@@ -73,11 +77,13 @@ static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
   struct http_request req = {
       .method        = HTTP_POST,
       .url           = CONFIG_SERVER_URL,
-      .host          = CONFIG_SERVER_HOST,
+      .host          = SERVER_HOST,
       .protocol      = "HTTP/1.1",
       .header_fields = headers,
       .payload       = data,
       .payload_len   = len,
+      .recv_buf      = recv_buf,
+      .recv_buf_len  = sizeof(recv_buf),
       .response      = http_response_cb,
   };
 
@@ -86,14 +92,18 @@ static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
 }
 
 static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unused) {
+  int ret = tls_credential_add(TLS_CA_TAG, TLS_CREDENTIAL_CA_CERTIFICATE, g_google_ca,
+                               sizeof(g_google_ca));
+  if (ret < 0) {
+    LOG_ERR("Add TLS credential failed (%d)", ret);
+  }
+
   k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
 
   int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TLS_1_2);
   if (sock < 0) {
     LOG_ERR("Failed to create sock (%d)", -errno);
   }
-
-  tls_credential_add(TLS_CA_TAG, TLS_CREDENTIAL_CA_CERTIFICATE, g_google_ca, sizeof(g_google_ca));
 
   const sec_tag_t sec_tags[] = {
       TLS_CA_TAG,
@@ -103,7 +113,7 @@ static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __un
     close(sock);
   }
 
-  if (setsockopt(sock, SOL_TLS, TLS_HOSTNAME, CONFIG_SERVER_HOST, strlen(CONFIG_SERVER_HOST)) < 0) {
+  if (setsockopt(sock, SOL_TLS, TLS_HOSTNAME, SERVER_HOST, strlen(SERVER_HOST)) < 0) {
     LOG_ERR("Failed to set TLS_HOSTNAME (%d)", -errno);
     close(sock);
   }
@@ -115,8 +125,9 @@ static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __un
     };
 
     struct addrinfo *results;
-    if (getaddrinfo(CONFIG_SERVER_HOST, NULL, &hints, &results)) {
-      LOG_ERR("Failed to resolve host (%d)", -EHOSTUNREACH);
+    int ret = getaddrinfo(SERVER_HOST, NULL, &hints, &results);
+    if (ret) {
+      LOG_ERR("Failed to resolve host (%d)", ret == EAI_SYSTEM ? -errno : ret);
       close(sock);
     }
 
@@ -139,9 +150,16 @@ static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __un
       continue;
     }
 
-    server_upload_data(sock, (uint8_t *)g_csi_msg_buf,
-                       g_csi_msg_count * (LORA_HDR_SIZE + CSI_DATA_SIZE));
-    server_upload_data(sock, g_sensor_msg_buf,
-                       g_sensor_msg_count * (LORA_HDR_SIZE + SENSOR_DATA_SIZE));
+    LOG_INF("Sem given");
+
+    ret = server_upload_data(sock, (uint8_t *)g_csi_msg_buf,
+                             g_csi_msg_count * (LORA_HDR_SIZE + CSI_DATA_SIZE));
+    if (ret < 0) {
+      LOG_ERR("No response from Google Apps Script (%d)", ret);
+    } else {
+      LOG_INF("Sent %d bytes to Google Apps Script", ret);
+    }
+    /* server_upload_data(sock, g_sensor_msg_buf,
+                       g_sensor_msg_count * (LORA_HDR_SIZE + SENSOR_DATA_SIZE)); */
   }
 }

@@ -18,5 +18,5 @@ target_include_directories(app PRIVATE include)
 
 set(gen_dir ${ZEPHYR_BINARY_DIR}/include/generated/)
 
-generate_inc_file_for_target(app src/google-root-ca.pem
+generate_inc_file_for_target(app src/gts_root_r4.pem
                                  ${gen_dir}/google_root_ca.inc)

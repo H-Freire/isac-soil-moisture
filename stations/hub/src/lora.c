@@ -13,7 +13,7 @@
 #include "hub.h"
 
 #define LORA_RX_PRIORITY   4
-#define LORA_RX_STACK_SIZE 2048
+#define LORA_RX_STACK_SIZE 1000
 
 BUILD_ASSERT(DT_NODE_HAS_STATUS_OKAY(LORA_NODE), "No default LoRa radio specified in DT");
 
@@ -31,7 +31,6 @@ static void lora_rx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
   k_event_wait(&g_net_events, NET_READY, false, K_FOREVER);
 
   while (true) {
-    // lora_ack_t ack;
     // Unset deadline
     k_timepoint_t deadline = sys_timepoint_calc(K_FOREVER);
 
@@ -85,7 +84,7 @@ static void lora_rx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
           break;
         }
 
-        LOG_DBG("LoRa RX RSSI: %d dBm, SNR: %d db", rssi, snr);
+        LOG_DBG("LoRa RX len: %d, RSSI: %d dBm, SNR: %d db", len, rssi, snr);
         LOG_HEXDUMP_DBG(&pkt->payload, len, "Sensor msg payload");
       }
     }
