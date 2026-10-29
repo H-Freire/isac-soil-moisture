@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
-
+//
 // SPDX-License-Identifier: MIT
 
 #include <zephyr/kernel.h>
@@ -142,12 +142,14 @@ static void storage_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
       continue;
     }
 
+    uint64_t time = get_timestamp();
+
+    fs_write(&open_files[target_idx].file, &time, sizeof(time));
     fs_write(&open_files[target_idx].file, write_data, write_size);
+    fs_sync(&open_files[target_idx].file);
 
     if (atomic_dec(&pkt->refs) == 1) {
       k_mem_slab_free(&g_csi_slab, (void *)pkt);
     }
-
-    fs_sync(&open_files[target_idx].file);
   }
 }

@@ -1,0 +1,21 @@
+&i2c0 {
+    status = "okay";
+
+    ds3231: ds3231@68 {
+        compatible = "maxim,ds3231-mfd";
+        reg = <0x68>;
+        status = "okay";
+
+        ds3231_rtc: rtc {
+            compatible = "maxim,ds3231-rtc";
+            alarms-count = <2>;
+            status = "okay";
+        };
+    };
+};
+
+/ {
+    aliases {
+        rtc = &ds3231_rtc;
+    };
+};

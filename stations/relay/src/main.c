@@ -49,6 +49,8 @@ static void net_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_
 int main(void) {
   LOG_INF("Starting LoRa <-> Wi-Fi gateway");
 
+  rtc_sync();
+
   net_mgmt_init_event_callback(&s_net_cb, net_event_handler, NET_EVENTS);
   net_mgmt_add_event_callback(&s_net_cb);
 

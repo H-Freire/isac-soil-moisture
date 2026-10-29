@@ -26,8 +26,6 @@ K_THREAD_DEFINE(lora_tx_tid, LORA_TX_STACK_SIZE, lora_tx_thread, NULL, NULL, NUL
                 0, 0);
 
 static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unused) {
-  // lora_ack_t ack;
-  // struct k_timer ack_timer;
   csi_item_t *item;
 
   lora_data_t data = {
@@ -37,8 +35,6 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
               .id    = LORA_DATA_ID,
           },
   };
-
-  // k_timer_init(&ack_timer, NULL, NULL);
 
   while (true) {
     item = (csi_item_t *)k_fifo_get(&g_lora_fifo, K_FOREVER);
@@ -50,7 +46,8 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
       const sensor_data_t *const pkt = (sensor_data_t *)&msg->payload.sensor;
 
       memcpy((uint8_t *)&data.payload.sensor, (uint8_t *)pkt, SENSOR_DATA_SIZE);
-      data.hdr.type = MSG_ID_SENSORS;
+      data.hdr.type      = MSG_ID_SENSORS;
+      data.timestamp_sec = get_timestamp();
 
       int ret = lora_send(g_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + SENSOR_DATA_SIZE);
       if (ret < 0) {
@@ -62,11 +59,14 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
       const csi_data_t *const pkt = (csi_data_t *)&msg->payload.csi;
       for (size_t i = 0; i < pkt->count; i++) {
         memcpy((uint8_t *)&data.payload.csi, (uint8_t *)&pkt->data[i], CSI_DATA_SIZE);
-        data.hdr.type = MSG_ID_CSI;
+        data.hdr.type      = MSG_ID_CSI;
+        data.timestamp_sec = get_timestamp();
 
         int ret = lora_send(g_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + CSI_DATA_SIZE);
         if (ret < 0) {
           LOG_ERR("LoRa CSI send failed");
+        } else {
+          LOG_INF("LoRa CSI sent");
         }
       }
       break;
@@ -80,30 +80,5 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
     if (atomic_dec(&item->refs) == 1) {
       k_mem_slab_free(&g_csi_slab, (void *)item);
     }
-
-    /* TODO: ACK request */
-
-    /*
-    k_timer_start(&ack_timer, K_SECONDS(2), K_FOREVER);
-
-    int8_t snr;
-    int16_t rssi;
-    k_timeout_t timeout;
-    while ((timeout.ticks = k_timer_remaining_ticks(&ack_timer)) > 0) {
-      int ret = lora_recv(g_lora_dev, (uint8_t *)&ack, sizeof(ack), timeout, &rssi, &snr);
-      if (ret < 0) {
-        LOG_ERR("LoRa recv failed (%d)", ret);
-        continue;
-      }
-
-      if (ack.magic != LORA_MAGIC || ack.id != LORA_ACK_ID) {
-        LOG_INF("LoRa message not intended for device");
-        continue;
-      }
-
-      // TODO: Evaluate what to resend (bitmap)
-      break;
-    }
-    */
   }
 }

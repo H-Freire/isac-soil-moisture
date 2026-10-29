@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
-
+//
 // SPDX-License-Identifier: MIT
 
 #pragma once
@@ -20,6 +20,7 @@ typedef struct {
 } csi_item_t;
 
 extern const struct device *g_lora_dev;
+extern const struct device *g_rtc_dev;
 
 extern struct k_event g_ap_events;
 extern struct k_fifo g_lora_fifo;
@@ -28,3 +29,6 @@ extern struct k_mem_slab g_csi_slab;
 
 void ap_init(void);
 void sd_card_init(void);
+int rtc_sync(void);
+uint64_t get_timestamp();
+int get_current_utc(char *buf, size_t buf_size);

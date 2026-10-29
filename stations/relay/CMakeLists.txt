@@ -13,6 +13,7 @@ target_sources(app PRIVATE
   src/lora.c
   src/main.c
   src/storage.c
+  src/time.c
   src/wifi.c
 )
 target_include_directories(app PRIVATE include)
