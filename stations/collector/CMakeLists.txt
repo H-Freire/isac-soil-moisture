@@ -12,6 +12,6 @@ project(collector)
 target_sources(app PRIVATE
   src/csi.c
   src/main.c
-  src/sensor.c
+  # src/sensor.c
 )
 target_include_directories(app PRIVATE include)
