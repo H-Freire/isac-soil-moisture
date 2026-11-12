@@ -4,6 +4,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
+#include <zephyr/kernel/thread_stack.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/http/client.h>
 #include <zephyr/net/socket.h>
@@ -17,13 +18,14 @@
 
 #include "ca_certificate.h"
 #include "hub.h"
+#include "wifi_sensing.h"
 
 #define SERVER_TX_PRIORITY   5
 #define SERVER_TX_STACK_SIZE 4096
 
 #define HTTPS_PORT 443
 
-#define CONTENT_TYPE      "application/octet-stream"
+#define CONTENT_TYPE      "text/plain"
 #define RESPONSE_BUF_SIZE 32
 
 #define BASE64_IN_SIZE  384
@@ -38,8 +40,17 @@ LOG_MODULE_DECLARE(hub);
 
 static void server_tx_thread(void *p1, void *p2, void *p3);
 
-K_THREAD_DEFINE(server_tx_tid, SERVER_TX_STACK_SIZE, server_tx_thread, NULL, NULL, NULL,
-                SERVER_TX_PRIORITY, 0, 0);
+static struct k_thread s_server_tx_thread;
+
+struct z_thread_stack_element __attribute__((section(".bss")))
+__aligned(ARCH_THREAD_STACK_OBJ_ALIGN(ARCH_THREAD_STACK_SIZE_ADJUST((SERVER_TX_STACK_SIZE) +
+                                                                    K_THREAD_STACK_RESERVED)))
+    server_tx_stack[K_THREAD_STACK_LEN(SERVER_TX_STACK_SIZE)];
+
+void create_server_thread(void) {
+  k_thread_create(&s_server_tx_thread, server_tx_stack, K_THREAD_STACK_SIZEOF(server_tx_stack),
+                  server_tx_thread, NULL, NULL, NULL, SERVER_TX_PRIORITY, 0, K_NO_WAIT);
+}
 
 static int http_response_cb(struct http_response *rsp, enum http_final_call final_data,
                             void *user_data) {
@@ -73,7 +84,8 @@ static int http_response_cb(struct http_response *rsp, enum http_final_call fina
 }
 
 static int payload_cb(int sock, struct http_request *req __unused, void *user_data) {
-  uint8_t encoded[BASE64_OUT_SIZE];
+  // Zephyr's Base64 encoding uses NULL-terminated strings
+  uint8_t encoded[BASE64_OUT_SIZE + 1U];
 
   size_t total_sent   = 0;
   size_t input_offset = 0;
@@ -92,6 +104,7 @@ static int payload_cb(int sock, struct http_request *req __unused, void *user_da
         base64_encode(encoded, sizeof(encoded), &encoded_len, ctx->data + input_offset, input_len);
 
     if (ret < 0) {
+      LOG_ERR("Insufficient memory for Base64 encoding");
       return ret;
     }
 
@@ -99,6 +112,7 @@ static int payload_cb(int sock, struct http_request *req __unused, void *user_da
       ssize_t sent = send(sock, encoded + sent_offset, encoded_len - sent_offset, 0);
 
       if (sent < 0) {
+        LOG_ERR("Failed to send with socket (%d)", -errno);
         return -errno;
       }
 
@@ -116,7 +130,6 @@ static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
   static uint8_t recv_buf[512];
   static const char *const headers[] = {
       "Content-Type: " CONTENT_TYPE "\r\n",
-      "X-API-Key: " CONFIG_SERVER_SECRET "\r\n",
       NULL,
   };
 
@@ -131,8 +144,8 @@ static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
 
   struct http_request req = {
       .method        = HTTP_POST,
-      .url           = CONFIG_SERVER_URL,
       .host          = SERVER_HOST,
+      .url           = CONFIG_SERVER_URL "?api-key=" CONFIG_SERVER_SECRET,
       .protocol      = "HTTP/1.1",
       .header_fields = headers,
       .payload_cb    = payload_cb,
@@ -143,7 +156,7 @@ static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
   };
 
   // Wait 10 seconds (10_000 milliseconds) for response
-  return http_client_req(sock, &req, 10000, &ctx);
+  return http_client_req(sock, &req, 1000 * SENSING_INTERVAL_SEC / 2, &ctx);
 }
 
 static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unused) {
@@ -207,14 +220,13 @@ static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __un
 
     LOG_INF("Sem given");
 
-    ret = server_upload_data(sock, (uint8_t *)g_csi_msg_buf,
-                             g_csi_msg_count * (LORA_HDR_SIZE + CSI_DATA_SIZE));
+    ret = server_upload_data(sock, (uint8_t *)g_csi_msg_buf, MAX_MSGS * sizeof(g_csi_msg_buf[0]));
     if (ret < 0) {
       LOG_ERR("No response from Google Apps Script (%d)", ret);
     } else {
       LOG_INF("Sent %d bytes to Google Apps Script", ret);
     }
     /* server_upload_data(sock, g_sensor_msg_buf,
-                       g_sensor_msg_count * (LORA_HDR_SIZE + SENSOR_DATA_SIZE)); */
+                       g_sensor_msg_count * (LORA_HDR_SIZE + 8 + SENSOR_DATA_SIZE)); */
   }
 }

@@ -10,6 +10,8 @@
 
 #define LORA_NODE DT_ALIAS(lora0)
 
+void create_server_thread(void);
+
 extern const struct device *g_lora_dev;
 
 // server_tx_thread

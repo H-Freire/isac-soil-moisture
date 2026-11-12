@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
-
+//
 // SPDX-License-Identifier: MIT
 
 #include <zephyr/device.h>
@@ -30,4 +30,5 @@ int main(void) {
 
   ap_connect(NULL);
   lora_init(g_lora_dev, false);
+  create_server_thread();
 }
