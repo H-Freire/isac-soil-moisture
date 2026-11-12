@@ -12,6 +12,8 @@
 #include <zephyr/posix/netdb.h>
 #include <zephyr/posix/sys/socket.h>
 #include <zephyr/posix/unistd.h>
+#include <zephyr/sys/base64.h>
+#include <zephyr/sys/util.h>
 
 #include "ca_certificate.h"
 #include "hub.h"
@@ -23,6 +25,14 @@
 
 #define CONTENT_TYPE      "application/octet-stream"
 #define RESPONSE_BUF_SIZE 32
+
+#define BASE64_IN_SIZE  384
+#define BASE64_OUT_SIZE ROUND_UP(4 * BASE64_IN_SIZE / 3, 4)
+
+typedef struct {
+  const uint8_t *data;
+  size_t len;
+} upload_ctx_t;
 
 LOG_MODULE_DECLARE(hub);
 
@@ -62,12 +72,57 @@ static int http_response_cb(struct http_response *rsp, enum http_final_call fina
   return 0;
 }
 
+static int payload_cb(int sock, struct http_request *req __unused, void *user_data) {
+  uint8_t encoded[BASE64_OUT_SIZE];
+
+  size_t total_sent   = 0;
+  size_t input_offset = 0;
+  upload_ctx_t *ctx   = (upload_ctx_t *)user_data;
+
+  if (ctx == NULL || (ctx->data == NULL && ctx->len != 0)) {
+    return -EINVAL;
+  }
+
+  size_t encoded_len;
+  while (input_offset < ctx->len) {
+    size_t sent_offset = 0;
+    size_t input_len   = MIN(ctx->len - input_offset, BASE64_IN_SIZE);
+
+    int ret =
+        base64_encode(encoded, sizeof(encoded), &encoded_len, ctx->data + input_offset, input_len);
+
+    if (ret < 0) {
+      return ret;
+    }
+
+    while (sent_offset < encoded_len) {
+      ssize_t sent = send(sock, encoded + sent_offset, encoded_len - sent_offset, 0);
+
+      if (sent < 0) {
+        return -errno;
+      }
+
+      sent_offset += (size_t)sent;
+      total_sent += (size_t)sent;
+    }
+
+    input_offset += input_len;
+  }
+
+  return (int)total_sent;
+}
+
 static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
   static uint8_t recv_buf[512];
   static const char *const headers[] = {
       "Content-Type: " CONTENT_TYPE "\r\n",
       "X-API-Key: " CONFIG_SERVER_SECRET "\r\n",
       NULL,
+  };
+
+  upload_ctx_t ctx = {
+      .data = data,
+      .len  = len,
   };
 
   if (!len) {
@@ -80,15 +135,15 @@ static int server_upload_data(int sock, const uint8_t *data, const size_t len) {
       .host          = SERVER_HOST,
       .protocol      = "HTTP/1.1",
       .header_fields = headers,
-      .payload       = data,
-      .payload_len   = len,
+      .payload_cb    = payload_cb,
+      .payload_len   = ROUND_UP(4 * len / 3, 4),
       .recv_buf      = recv_buf,
       .recv_buf_len  = sizeof(recv_buf),
       .response      = http_response_cb,
   };
 
   // Wait 10 seconds (10_000 milliseconds) for response
-  return http_client_req(sock, &req, 10000, NULL);
+  return http_client_req(sock, &req, 10000, &ctx);
 }
 
 static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unused) {
