@@ -1,3 +1,13 @@
+/ {
+    alias {
+        rtc = &ds3231_rtc;
+    };
+
+    chosen {
+        zephyr,rtc = &ds3231_rtc;
+    };
+};
+
 &i2c0 {
     status = "okay";
 
@@ -8,14 +18,8 @@
 
         ds3231_rtc: rtc {
             compatible = "maxim,ds3231-rtc";
-            alarms-count = <2>;
             status = "okay";
+            alarms-count = <2>;
         };
-    };
-};
-
-/ {
-    aliases {
-        rtc = &ds3231_rtc;
     };
 };
