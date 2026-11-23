@@ -1,5 +1,5 @@
 / {
-    alias {
+    aliases {
         rtc = &ds3231_rtc;
     };
 
