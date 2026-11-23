@@ -13,6 +13,9 @@
 #define LORA_MAGIC    0xDEADC0DE
 #define LORA_HDR_SIZE sizeof(lora_msg_hdr_t)
 
+#define CSI_MSG_SIZE    (LORA_HDR_SIZE + 8 + CSI_DATA_SIZE)
+#define SENSOR_MSG_SIZE (LORA_HDR_SIZE + 8 + SENSOR_DATA_SIZE)
+
 enum {
   LORA_DATA_ID    = 0x0987,
   LORA_ACK_ID     = 0x1234,
