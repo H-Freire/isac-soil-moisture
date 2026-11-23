@@ -114,8 +114,8 @@ static void storage_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
       /*
        * Filename for MAC address 01:23:45:67:89
        *
-       * CSI    file: 01-23-45-67-89_csi.bin
-       * Sensor file: 01-23-45-67-89_sensor.bin
+       * CSI    file: 01-23-45-67-89-ab_csi.bin
+       * Sensor file: 01-23-45-67-89-ab_sensor.bin
        *
        */
       snprintf(file_path, sizeof(file_path),
@@ -125,8 +125,9 @@ static void storage_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
 
       fs_file_t_init(&open_files[free_idx].file);
 
-      if (fs_open(&open_files[free_idx].file, file_path, FS_O_CREATE | FS_O_APPEND | FS_O_WRITE) ==
-          0) {
+      int err =
+          fs_open(&open_files[free_idx].file, file_path, FS_O_CREATE | FS_O_APPEND | FS_O_WRITE);
+      if (!err) {
         target_idx                   = free_idx;
         open_files[free_idx].key     = dev_key;
         open_files[free_idx].is_open = true;
@@ -134,7 +135,7 @@ static void storage_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
         LOG_INF("Opened new file stream for " MACSTR " at index %d", MAC2STR(*mac_addr),
                 target_idx);
       } else {
-        LOG_ERR("Failed to open file: %s", file_path);
+        LOG_ERR("Failed to open file %s (%d)", file_path, err);
         continue;
       }
     } else {
