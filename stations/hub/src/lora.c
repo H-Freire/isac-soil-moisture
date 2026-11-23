@@ -43,7 +43,7 @@ static void lora_rx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
       k_timeout_t timeout;
       for (i = 0, timeout = K_FOREVER; i < MAX_MSGS && !K_TIMEOUT_EQ(timeout, K_NO_WAIT);
            i++, timeout   = sys_timepoint_timeout(deadline)) {
-        pkt = &g_csi_msg_buf[i];
+        pkt = (lora_data_t *)&g_csi_msg_buf[i];
 
         int len = lora_recv(g_lora_dev, (uint8_t *)pkt, sizeof(*pkt), timeout, &rssi, &snr);
 
@@ -67,10 +67,9 @@ static void lora_rx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
           if (pkt->hdr.type == MSG_ID_SENSORS) {
             static size_t s_sensor_msg_idx;
 
-            memcpy(&g_sensor_msg_buf[s_sensor_msg_idx], (uint8_t *)pkt,
-                   LORA_HDR_SIZE + SENSOR_DATA_SIZE);
+            memcpy(&g_sensor_msg_buf[s_sensor_msg_idx], (uint8_t *)pkt, SENSOR_MSG_SIZE);
             s_sensor_msg_idx =
-                (s_sensor_msg_idx + LORA_HDR_SIZE + SENSOR_DATA_SIZE) % sizeof(g_sensor_msg_buf);
+                (s_sensor_msg_idx + 1) % (sizeof(g_sensor_msg_buf) / sizeof(g_sensor_msg_buf[0]));
 
             i--;
             sensor_msg_count++;
