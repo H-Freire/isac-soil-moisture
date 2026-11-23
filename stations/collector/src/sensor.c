@@ -112,7 +112,7 @@ static void sensor_thread(void *p1 __unused, void *p2 __unused, void *p3 __unuse
       LOG_ERR("Could not convert ADC reading to millivolts: %d", ret);
     }
 
-    pkt->moisture = (uint16_t)filtered_mean;
+    pkt->temp = (uint16_t)filtered_mean;
 
     ret = send(sock, &msg, MSG_HDR_SIZE + SENSOR_DATA_SIZE, 0);
     if (ret < 0) {

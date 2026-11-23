@@ -66,7 +66,6 @@ typedef struct {
 
 typedef struct {
   uint16_t temp;
-  uint16_t moisture;
   uint8_t mac[MAC_ADDR_LEN];
 
   // Whether the data collection happened because of a timeout
