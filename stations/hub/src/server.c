@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Henrique Freire <hfreire10@hotmail.com>
-
+//
 // SPDX-License-Identifier: MIT
 
 #include <zephyr/device.h>
@@ -220,13 +220,20 @@ static void server_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __un
 
     LOG_INF("Sem given");
 
-    ret = server_upload_data(sock, (uint8_t *)g_csi_msg_buf, MAX_MSGS * sizeof(g_csi_msg_buf[0]));
+    ret = server_upload_data(sock, (uint8_t *)g_csi_msg_buf,
+                             g_csi_msg_count * sizeof(g_csi_msg_buf[0]));
     if (ret < 0) {
-      LOG_ERR("No response from Google Apps Script (%d)", ret);
+      LOG_ERR("CSI - No response from Google Apps Script (%d)", ret);
     } else {
-      LOG_INF("Sent %d bytes to Google Apps Script", ret);
+      LOG_INF("CSI - Sent %d bytes to Google Apps Script", ret);
     }
-    /* server_upload_data(sock, g_sensor_msg_buf,
-                       g_sensor_msg_count * (LORA_HDR_SIZE + 8 + SENSOR_DATA_SIZE)); */
+
+    ret = server_upload_data(sock, (uint8_t *)g_sensor_msg_buf,
+                             g_sensor_msg_count * (LORA_HDR_SIZE + 8 + SENSOR_DATA_SIZE));
+    if (ret < 0) {
+      LOG_ERR("Sensor - No response from Google Apps Script (%d)", ret);
+    } else {
+      LOG_INF("Sensor - Sent %d bytes to Google Apps Script", ret);
+    }
   }
 }
