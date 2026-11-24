@@ -24,6 +24,7 @@
 #define CHANNEL_VREF(node_id) DT_PROP_OR(node_id, zephyr_vref_mv, 3300)
 
 BUILD_ASSERT(SENSOR_SAMPLES >= 1, "Invalid count of sensor samples");
+BUILD_ASSERT(DT_NODE_HAS_STATUS_OKAY(ADC_NODE), "ADC controller disabled");
 
 LOG_MODULE_DECLARE(collector);
 

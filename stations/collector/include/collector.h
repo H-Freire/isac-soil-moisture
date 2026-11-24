@@ -27,8 +27,6 @@ typedef enum {
   EXT_ANT,
 } antenna_e;
 
-BUILD_ASSERT(DT_NODE_HAS_STATUS_OKAY(ADC_NODE), "ADC controller disabled");
-
 static const struct gpio_dt_spec s_ant_sel = GPIO_DT_SPEC_GET(RF_SWITCH_NODE, select_gpios);
 
 extern const struct device *g_adc;
