@@ -37,7 +37,7 @@ int rtc_sync(void) {
   return k_work_reschedule(&rtc_sync_work, RTC_SYNC_INTERVAL);
 }
 
-uint64_t get_timestamp() {
+uint64_t get_timestamp(void) {
   struct timespec ts;
 
   if (sys_clock_gettime(SYS_CLOCK_REALTIME, &ts) < 0) {
