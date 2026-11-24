@@ -20,6 +20,8 @@ BUILD_ASSERT(DT_NODE_HAS_STATUS_OKAY(LORA_NODE), "No default LoRa radio specifie
 
 LOG_MODULE_DECLARE(relay);
 
+const static struct device *s_lora_dev = DEVICE_DT_GET(LORA_NODE);
+
 static void lora_tx_thread(void *p1, void *p2, void *p3);
 
 K_THREAD_DEFINE(lora_tx_tid, LORA_TX_STACK_SIZE, lora_tx_thread, NULL, NULL, NULL, LORA_TX_PRIORITY,
@@ -27,7 +29,6 @@ K_THREAD_DEFINE(lora_tx_tid, LORA_TX_STACK_SIZE, lora_tx_thread, NULL, NULL, NUL
 
 static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unused) {
   csi_item_t *item;
-
   lora_data_t data = {
       .hdr =
           {
@@ -35,6 +36,8 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
               .id    = LORA_DATA_ID,
           },
   };
+
+  lora_init(s_lora_dev, true);
 
   while (true) {
     item = (csi_item_t *)k_fifo_get(&g_lora_fifo, K_FOREVER);
@@ -49,7 +52,7 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
       data.hdr.type      = MSG_ID_SENSORS;
       data.timestamp_sec = get_timestamp();
 
-      int ret = lora_send(g_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + SENSOR_DATA_SIZE);
+      int ret = lora_send(s_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + SENSOR_DATA_SIZE);
       if (ret < 0) {
         LOG_ERR("LoRa sensor send failed");
       }
@@ -62,7 +65,7 @@ static void lora_tx_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
         data.hdr.type      = MSG_ID_CSI;
         data.timestamp_sec = get_timestamp();
 
-        int ret = lora_send(g_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + CSI_DATA_SIZE);
+        int ret = lora_send(s_lora_dev, (uint8_t *)&data, LORA_HDR_SIZE + CSI_DATA_SIZE);
         if (ret < 0) {
           LOG_ERR("LoRa CSI send failed");
         } else {

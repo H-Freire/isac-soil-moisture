@@ -13,7 +13,7 @@
 #include "relay.h"
 
 #define STORAGE_PRIORITY   5
-#define STORAGE_STACK_SIZE 1024
+#define STORAGE_STACK_SIZE 4096
 
 #define DISK_DRIVE_NAME "SD"
 #define DISK_MOUNT_PT   "/" DISK_DRIVE_NAME ":"
@@ -35,8 +35,17 @@ static struct fs_mount_t s_mp = {
 
 static void storage_thread(void *p1, void *p2, void *p3);
 
-K_THREAD_DEFINE(storage_tid, STORAGE_STACK_SIZE, storage_thread, NULL, NULL, NULL, STORAGE_PRIORITY,
-                0, 0);
+static struct k_thread s_storage_thread;
+
+struct z_thread_stack_element __attribute__((section(".bss")))
+__aligned(ARCH_THREAD_STACK_OBJ_ALIGN(ARCH_THREAD_STACK_SIZE_ADJUST((STORAGE_STACK_SIZE) +
+                                                                    K_THREAD_STACK_RESERVED)))
+    storage_stack[K_THREAD_STACK_LEN(STORAGE_STACK_SIZE)];
+
+void create_storage_thread(void) {
+  k_thread_create(&s_storage_thread, storage_stack, K_THREAD_STACK_SIZEOF(storage_stack),
+                  storage_thread, NULL, NULL, NULL, STORAGE_PRIORITY, 0, K_NO_WAIT);
+}
 
 void sd_card_init(void) {
   static const char *disk_pdrv = DISK_DRIVE_NAME;
@@ -58,6 +67,8 @@ static void storage_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
   csi_item_t *pkt;
   // Lower half corresponds to CSI files, while the upper half corresponds to reference sensors
   file_node_t open_files[2 * MAX_DEVICES] = {};
+
+  sd_card_init();
 
   while (true) {
     void *write_data;
@@ -108,39 +119,41 @@ static void storage_thread(void *p1 __unused, void *p2 __unused, void *p3 __unus
     }
 
     /* Create new file (none open for the given device) */
-    if (target_idx == -1 && free_idx != -1) {
-      char file_path[40];
+    if (target_idx == -1) {
+      if (free_idx != -1) {
+        char file_path[40];
 
-      /*
-       * Filename for MAC address 01:23:45:67:89
-       *
-       * CSI    file: 01-23-45-67-89-ab_csi.bin
-       * Sensor file: 01-23-45-67-89-ab_sensor.bin
-       *
-       */
-      snprintf(file_path, sizeof(file_path),
-               DISK_MOUNT_PT "/" MACSTR "%s"
-                             ".bin",
-               MAC2STR(*mac_addr), free_idx < MAX_DEVICES ? "_csi" : "_sensor");
+        /*
+         * Filename for MAC address 01:23:45:67:89:AB
+         *
+         * CSI    file: 01-23-45-67-89-ab_csi.bin
+         * Sensor file: 01-23-45-67-89-ab_sensor.bin
+         *
+         */
+        snprintf(file_path, sizeof(file_path),
+                 DISK_MOUNT_PT "/" MACSTR "%s"
+                               ".bin",
+                 MAC2STR(*mac_addr), free_idx < MAX_DEVICES ? "_csi" : "_sensor");
 
-      fs_file_t_init(&open_files[free_idx].file);
+        fs_file_t_init(&open_files[free_idx].file);
 
-      int err =
-          fs_open(&open_files[free_idx].file, file_path, FS_O_CREATE | FS_O_APPEND | FS_O_WRITE);
-      if (!err) {
-        target_idx                   = free_idx;
-        open_files[free_idx].key     = dev_key;
-        open_files[free_idx].is_open = true;
+        int err =
+            fs_open(&open_files[free_idx].file, file_path, FS_O_CREATE | FS_O_APPEND | FS_O_WRITE);
+        if (!err) {
+          target_idx                   = free_idx;
+          open_files[free_idx].key     = dev_key;
+          open_files[free_idx].is_open = true;
 
-        LOG_INF("Opened new file stream for " MACSTR " at index %d", MAC2STR(*mac_addr),
-                target_idx);
+          LOG_INF("Opened new file stream for " MACSTR " at index %d", MAC2STR(*mac_addr),
+                  target_idx);
+        } else {
+          LOG_ERR("Failed to open file %s (%d)", file_path, err);
+          continue;
+        }
       } else {
-        LOG_ERR("Failed to open file %s (%d)", file_path, err);
+        LOG_ERR("Max devices reached. Cannot open new file");
         continue;
       }
-    } else {
-      LOG_ERR("Max devices reached. Cannot open new file");
-      continue;
     }
 
     uint64_t time = get_timestamp();

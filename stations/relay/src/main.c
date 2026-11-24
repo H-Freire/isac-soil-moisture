@@ -7,8 +7,6 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/net/wifi_mgmt.h>
 
-#include "lora.h"
-
 #include "relay.h"
 
 #define NET_EVENTS                                                                                 \
@@ -16,8 +14,6 @@
    NET_EVENT_WIFI_AP_STA_DISCONNECTED)
 
 LOG_MODULE_REGISTER(relay);
-
-const struct device *g_lora_dev = DEVICE_DT_GET(LORA_NODE);
 
 static struct net_mgmt_event_callback s_net_cb;
 
@@ -54,9 +50,8 @@ int main(void) {
   net_mgmt_init_event_callback(&s_net_cb, net_event_handler, NET_EVENTS);
   net_mgmt_add_event_callback(&s_net_cb);
 
-  sd_card_init();
+  create_storage_thread();
   ap_init();
-  lora_init(g_lora_dev, true);
 
   return 0;
 }
